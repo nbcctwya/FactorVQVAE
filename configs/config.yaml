@@ -1,0 +1,68 @@
+# 모델 하이퍼파라미터
+vqvae:
+  input_channel: 1  
+  num_features: 158 
+  num_factors: 64 
+  hidden_size: 128    
+  num_elements: 64   
+  dropout: 0.1
+  num_heads: 4 
+  alpha: 10 
+  market_features: 13 
+
+transformer: 
+  use_market: True
+  num_tokens: 20        
+  hidden_size: 64      
+  heads: 4             
+  n_layers: 2          
+  ff_mult: 4            
+  pkeep: 1     
+  temperature : 1.0
+  attn_pdrop: 0.5     
+  checkpoint_folder: 'checkpoints'
+  saved_model: 'Stage1_C512_h128_e64_sd42-epoch=5-val_loss=0.00882.ckpt'
+  rank_loss: True
+  rank_loss_alpha: 0.1
+  dec_warmup: 0
+  eta: 1
+  omega: 0.1
+
+train:
+  device: "cuda"
+  batch_size: 300 
+  learning_rate: 0.0001
+  num_epochs: 100           
+  early_stop: 20
+  project_name: "VQVAE"
+  run_name: autmatically
+  group_name: GPT
+  gpu_counts: 4
+  precision: 32 
+  num_workers: 4
+  seed: 42                  
+
+data:
+  data_path: 'data' 
+  prefix: 'CN'
+  universe: 'csi300'
+  window_size: 20 
+  step: 1
+  train_period : [2009-01-01, 2019-12-31]
+  valid_period : [2020-01-01, 2021-12-31]
+  test_period  : [2022-01-01, 2024-12-31]
+  data_handler_config: 'data/data_handler_config.yaml'
+
+quantizer: 
+  affine_lr: 2    # (default: 0.0) lr scale for affine parameters
+  replace_freq: 20    # (default: None) frequency to replace dead codes
+  sync_nu: 2        # (default: 0.0) codebook synchronization contribution
+  beta: 0.25           # (default: 0.9) commitment trade-off #! 0.9 -> 0.25
+  kmeans_init: True    # (default: False) whether to use kmeans++ init
+  norm :               # (default: None) normalization for the input vectors
+  cb_norm:             # (default: None) normalization for codebook vectors
+
+# # for ablation
+# vae:
+#   recon_weights: 1
+#   kl_anneal_epochs: 10
