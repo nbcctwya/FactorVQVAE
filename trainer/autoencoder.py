@@ -62,7 +62,7 @@ class FactorVQVAE(pl.LightningModule):
         self.epoch_vq_codes = []
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        sd = torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:
@@ -133,7 +133,7 @@ class FactorVQVAE(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch = batch.squeeze(0)
-        firm_char = batch[:, :, 0:158]
+        firm_char = batch[:, :, :self.num_features]
         y = batch[:, :, -1].unsqueeze(-1)
         recon, cmt_loss, recon_loss, vq_dict = self.forward(firm_char, y)
         loss = self.calculate_loss(cmt_loss, recon_loss)
@@ -154,7 +154,7 @@ class FactorVQVAE(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         batch = batch.squeeze(0)
         
-        firm_char = batch[:, :, 0:158]
+        firm_char = batch[:, :, :self.num_features]
         y = batch[:, :, -1].unsqueeze(-1)
         recon, cmt_loss, recon_loss, vq_dict = self.forward(firm_char, y)
         loss = self.calculate_loss(cmt_loss, recon_loss)

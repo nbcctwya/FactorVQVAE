@@ -67,9 +67,11 @@ def run_inference(model, data_loader, device='cuda'):
     for batch_idx, batch in enumerate(tqdm(data_loader, desc="Running Inference")):
         batch = batch.to(device)
         batch = batch.squeeze(0)    
-        firm_char = batch[:, :, 0:158]
-        inputs = batch[:, :, 158+13].unsqueeze(-1)
-        market = batch[:, :, 158:158+13]
+        num_features = model.config['vqvae']['num_features']
+        market_features = model.config['vqvae']['market_features']
+        firm_char = batch[:, :, :num_features]
+        inputs = batch[:, :, -1].unsqueeze(-1)
+        market = batch[:, :, num_features:num_features + market_features]
 
         firm_char     = model.mingpt.feature_extractor(firm_char) 
         # firm_char_t = firm_char[:, :-1, :] # (B, T-1, 1)

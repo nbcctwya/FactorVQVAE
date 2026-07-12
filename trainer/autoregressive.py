@@ -68,9 +68,9 @@ class minGPT(pl.LightningModule):
             # Skip if the batch is empty
             return None
         
-        firm_char = batch[:, : ,0:158]
-        y = batch[:, :, 158].unsqueeze(-1)
-        market = batch[:, :, 159:]
+        firm_char = batch[:, :, :self.num_features]
+        market = batch[:, :, self.num_features:self.num_features + self.config['vqvae']['market_features']]
+        y = batch[:, :, -1].unsqueeze(-1)
         logit, target, y_hat = self.forward(firm_char, y, market)
         prior_loss = F.cross_entropy(logit.reshape(-1, logit.size(-1)), target.reshape(-1))
         mse_loss = self.mse_loss(y_hat, y)
@@ -83,9 +83,9 @@ class minGPT(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         batch = batch.squeeze(0)
-        firm_char = batch[:, : ,0:158]
+        firm_char = batch[:, :, :self.num_features]
         y = batch[:, :, -1].unsqueeze(-1)
-        market = batch[:, :, 158:158+13]
+        market = batch[:, :, self.num_features:self.num_features + self.config['vqvae']['market_features']]
 
         logit, target, y_hat = self.forward(firm_char, y, market)
         prior_loss = F.cross_entropy(logit.reshape(-1, logit.size(-1)), target.reshape(-1), ignore_index=-1)

@@ -2,6 +2,7 @@ import os
 import pickle
 import logging
 import yaml
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -23,11 +24,11 @@ def save_model(models_dict: dict, dirname='store', id: str = ''):
     :param models_dict: {'model_name': model, ...}
     """
 
-    if not os.path.isdir(get_root_dir().joinpath(dirname)):
-        os.mkdir(get_root_dir().joinpath(dirname))
+    dirname = Path(dirname)
+    dirname.mkdir(parents=True, exist_ok=True)
 
     id_ = id[:]
     if id != '':
         id_ = '-' + id_
     for model_name, model in models_dict.items():
-        torch.save(model.state_dict(), get_root_dir().joinpath(dirname, model_name + id_ + '.ckpt'))
+        torch.save(model.state_dict(), dirname / (model_name + id_ + '.ckpt'))

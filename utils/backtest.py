@@ -30,7 +30,9 @@ class InvestmentModel:
         
     def build_model(self, saved_model_path=None):
         saved_model_path = self.config['transformer']['saved_model'] if saved_model_path is None else saved_model_path
-        checkpoint = torch.load(saved_model_path, map_location=self.device)['state_dict']
+        checkpoint = torch.load(
+            saved_model_path, map_location=self.device, weights_only=False
+        )['state_dict']
         
         model = AutoRegressiveTransformer(temperature= 1, config = self.config)
         state_dict = {k.replace('mingpt.', ''): v for k, v in checkpoint.items() if k.startswith('mingpt.')}

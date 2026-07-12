@@ -1,0 +1,79 @@
+experiment:
+  market: csi300
+  stage2_seeds: [0, 1, 2, 3, 4]
+
+paths:
+  checkpoint_dir: outputs/csi300/checkpoints
+  log_dir: outputs/csi300/tb_logs
+  result_dir: outputs/csi300/results
+  store_dir: outputs/csi300/store
+
+data:
+  provider_uri: ~/.qlib/qlib_data/cn_data
+  region: cn
+  universe: csi300
+  prefix: CN
+  jkp_path: data/dataset/[chn]_[all_themes]_[daily]_[vw_cap].csv
+  data_path: data
+  window_size: 20
+  train_period: [2009-01-01, 2020-12-31]
+  valid_period: [2021-01-01, 2022-12-31]
+  test_period: [2023-01-01, 2025-12-31]
+  handler_start: 2008-01-01
+  handler_end: 2025-12-31
+  label: Ref($close, -5) / Ref($close, -1) - 1
+
+vqvae:
+  input_channel: 1
+  num_features: 158
+  num_factors: 512
+  hidden_size: 128
+  num_elements: 64
+  dropout: 0.1
+  num_heads: 4
+  alpha: 10
+  market_features: 13
+
+transformer:
+  use_market: true
+  num_tokens: 20
+  hidden_size: 64
+  heads: 2
+  n_layers: 2
+  ff_mult: 4
+  pkeep: 1
+  temperature: 1.0
+  attn_pdrop: 0.5
+  saved_model: stage1_best.ckpt
+  rank_loss: true
+  rank_loss_alpha: 0.1
+  dec_warmup: 0
+  eta: 1
+  omega: 0.1
+
+train:
+  stage1_seed: 42
+  seed: 42
+  batch_size: 300
+  learning_rate: 0.0001
+  num_epochs: 100
+  stage1_early_stop: 10
+  stage2_early_stop: 15
+  stage1_monitor: val_loss
+  stage2_monitor: Val_RIC
+  device: gpu
+  devices: 1
+  precision: 32
+  num_workers: 4
+  gradient_clip_val: 3.0
+  project_name: FactorVQVAE
+  run_name: automatic
+
+quantizer:
+  affine_lr: 2
+  replace_freq: 20
+  sync_nu: 2
+  beta: 0.25
+  kmeans_init: true
+  norm:
+  cb_norm:

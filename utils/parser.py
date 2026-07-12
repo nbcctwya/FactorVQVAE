@@ -9,8 +9,10 @@ def get_root_dir():
 
 def load_args():
     parser = ArgumentParser()
-    parser.add_argument('--config', type=str, help="Path to the config data  file.",
-                        default=get_root_dir().joinpath('configs', 'config.yaml'))
+    parser.add_argument('--config', type=str, required=True,
+                        help="Path to a market experiment configuration file.")
+    parser.add_argument('--seed', type=int, default=None,
+                        help="Optional Stage2 seed selected from experiment.stage2_seeds")
     return parser.parse_args()
 
 

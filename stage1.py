@@ -19,9 +19,10 @@ def train(config, train_prepare, valid_prepare):
     elements = config['vqvae']['num_elements']
     alpha = config['vqvae']['alpha']
     project_name = config['train']['project_name']
-    seed = config['train']['seed']
+    seed = config['train']['stage1_seed']
+    market = config['experiment']['market']
     if config['train']['run_name'] is not None:
-        run_name = f'Stage1_C{codebook_sizes}_h{hidden_size}_e{elements}_sd{seed}' # !Auto
+        run_name = f'{market}_Stage1_VQ{codebook_sizes}_sd{seed}'
     else:
         run_name = None
 
@@ -32,23 +33,23 @@ def train(config, train_prepare, valid_prepare):
 
     #* Init logger
     tensorboard_logger = TensorBoardLogger(
-        save_dir=os.path.join(get_root_dir(), 'tb_logs'),
+        save_dir=config['paths']['log_dir'],
         name=project_name,
         version=run_name
     )
 
     chekcpoint_callback = ModelCheckpoint(
         save_top_k=1,
-        monitor='val_loss',
+        monitor=config['train']['stage1_monitor'],
         mode='min',
-        dirpath=os.path.join(get_root_dir(), 'checkpoints'),
-        filename = f'{run_name}'+'-{epoch}-{val_loss:.5f}'
+        dirpath=config['paths']['checkpoint_dir'],
+        filename='stage1_best'
     )
 
     early_stop_callback = EarlyStopping(
         monitor='val_loss',
         min_delta=0.0001,
-        patience=10, # epochs to wait after min has been reached
+        patience=config['train']['stage1_early_stop'],
         verbose=True,
         mode='min'
     )
@@ -59,9 +60,9 @@ def train(config, train_prepare, valid_prepare):
                                     chekcpoint_callback, 
                                     early_stop_callback],
                          max_epochs=config['train']['num_epochs'],
-                         accelerator= 'gpu', # 'gpu'
+                         accelerator=config['train']['device'],
                          # strategy='ddp',
-                         devices= 1, # config['train']['gpu_counts'] if torch.cuda.is_available() else None,
+                         devices=config['train']['devices'],
                          precision = config['train']['precision'],
                          )
 
@@ -75,7 +76,7 @@ if __name__ == "__main__":
     config = load_yaml_param_settings(args.config)
     
     # * Set seed
-    seed_everything(config['train']['seed'])
+    seed_everything(config['train']['stage1_seed'])
 
     #* Load dataset
     pickle_path = config['data']['data_path']

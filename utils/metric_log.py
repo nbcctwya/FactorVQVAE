@@ -1,4 +1,7 @@
-import wandb
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 def log_metrics_as_bar_chart(metrics_dict):
     """
@@ -12,6 +15,9 @@ def log_metrics_as_bar_chart(metrics_dict):
     이 딕셔너리 내용을 Table로 만들어 바 차트로 wandb에 로깅합니다.
     """
     
+    if wandb is None:
+        return
+
     # 1) 딕셔너리를 (Metric, Value) 형태의 2차원 리스트로 변환
     data = []
     for key, value in metrics_dict.items():

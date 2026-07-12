@@ -7,14 +7,13 @@ import numpy as np
 import math
 from pathlib import Path
 from typing import Union, Callable, Optional
-import wandb
 import os
 import qlib
 from qlib.contrib.data.handler import Alpha158
 import pickle
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from utils import load_yaml_param_settings, load_args, get_root_dir, save_model, seed_everything, run_inference, UnfreezeDecoderCallback
@@ -31,6 +30,7 @@ def train_stage2(config, train_loader, valid_loader, test_loader):
     tf_head = config['transformer']['heads']
     tf_layers = config['transformer']['n_layers']
     seed = config['train']['seed']
+    market_name = config['experiment']['market']
     vq_hidden = config['vqvae']['hidden_size']
     vq_elements = config['vqvae']['num_elements']
     vq_code = config['vqvae']['num_factors']
@@ -40,7 +40,7 @@ def train_stage2(config, train_loader, valid_loader, test_loader):
     dec_warmup = config['transformer']['dec_warmup']
 
     if config['train']['run_name'] is not None:
-        run_name = f'Stage2_VQ{vq_code}_Th{tf_hidden}_h{tf_head}_l{tf_layers}_sd{seed}' # !Auto
+        run_name = f'{market_name}_Stage2_VQ{vq_code}_Th{tf_hidden}_h{tf_head}_l{tf_layers}_sd{seed}'
     else:
         raise NotImplementedError("run_name should be specified. We recommend to use the same run_name as stage1.")
 
@@ -50,23 +50,24 @@ def train_stage2(config, train_loader, valid_loader, test_loader):
     model = minGPT(config=config, n_train_samples=n_train_samples)
     
     #* init logger
-    group_name = config['train']['group_name'] if config['train']['group_name'] is not None else "실험 중"
-    wandb.init(project=project_name, name=run_name, config=config, group= group_name,entity="x7jeon8gi") # todo: group_name
-    wandb_logger = WandbLogger(project=project_name, name=run_name, config=config,entity="x7jeon8gi")
-    wandb_logger.watch(model, log='all')
+    logger = TensorBoardLogger(
+        save_dir=config['paths']['log_dir'],
+        name=project_name,
+        version=run_name,
+    )
 
     chekcpoint_callback = ModelCheckpoint(
         save_top_k=1,
-        monitor='Val_RIC',
+        monitor=config['train']['stage2_monitor'],
         mode='max',
-        dirpath=os.path.join(get_root_dir(), 'checkpoints'),
+        dirpath=config['paths']['checkpoint_dir'],
         filename = f'{run_name}'+'-{epoch}-{val_loss:.4f}'
     )
 
     early_stop_callback = EarlyStopping(
         monitor='val_loss',
         min_delta=0.0001,
-        patience=15, # epochs to wait after min has been reached
+        patience=config['train']['stage2_early_stop'],
         verbose=True,
         mode='min'
     )
@@ -75,38 +76,44 @@ def train_stage2(config, train_loader, valid_loader, test_loader):
                 chekcpoint_callback, 
                 early_stop_callback]
         
-    trainer = pl.Trainer(logger = wandb_logger,
+    trainer = pl.Trainer(logger = logger,
                     enable_checkpointing=True,
                     callbacks=callbacks,
                     max_epochs=config['train']['num_epochs'],
-                    accelerator= 'gpu', # 'gpu' # ! 디버깅을 위해 device를 cpu로 설정
+                    accelerator=config['train']['device'],
                     # strategy='ddp',
-                    devices= 1, # config['train']['gpu_counts'] if torch.cuda.is_available() else None,
+                    devices=config['train']['devices'],
                     num_nodes=1,
                     precision = config['train']['precision'],
-                    gradient_clip_val=3.0
+                    gradient_clip_val=config['train']['gradient_clip_val']
                     )
     
     trainer.fit(model, train_dataloaders = train_loader, val_dataloaders = valid_loader)
     # Best Model Load
-    model = minGPT.load_from_checkpoint(chekcpoint_callback.best_model_path, config=config, n_train_samples=n_train_samples)
+    model = minGPT.load_from_checkpoint(
+        chekcpoint_callback.best_model_path,
+        config=config,
+        n_train_samples=n_train_samples,
+        weights_only=False,
+    )
     model.eval()
     # run inference
     pred_df, rank_ic, metric = run_inference(model, test_loader)
-    pred_df.to_pickle(f"{get_root_dir()}/res/{run_name}.pkl")
-
-    # log metric
-    wandb.log(metric)
+    os.makedirs(config['paths']['result_dir'], exist_ok=True)
+    pred_df.to_pickle(os.path.join(config['paths']['result_dir'], f"{run_name}.pkl"))
 
     logging.info("Saving Models.")
-    save_model({'maskgit': model.mingpt})
+    save_model({'maskgit': model.mingpt}, dirname=config['paths']['store_dir'])
 
-    wandb.finish()
 
 if __name__ =="__main__":
     #* Load config
     args = load_args()
     config = load_yaml_param_settings(args.config)
+    if args.seed is not None:
+        if args.seed not in config['experiment']['stage2_seeds']:
+            raise ValueError(f"seed {args.seed} is not declared in experiment.stage2_seeds")
+        config['train']['seed'] = args.seed
     seed_everything(config['train']['seed'])
 
     #* Load dataset

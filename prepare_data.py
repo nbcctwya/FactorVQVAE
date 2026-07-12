@@ -1,0 +1,128 @@
+"""Build the cached Qlib datasets consumed by the two training stages.
+
+The resulting tensor layout is [Alpha158, JKP13, label], i.e. 172 columns.
+"""
+
+from argparse import ArgumentParser
+from pathlib import Path
+import pickle
+
+import numpy as np
+import pandas as pd
+import qlib
+import yaml
+from qlib.contrib.data.handler import Alpha158
+from qlib.data.dataset import DataHandlerLP, TSDatasetH
+
+
+JKP_COLUMNS = [
+    "accruals",
+    "debt_issuance",
+    "investment",
+    "low_leverage",
+    "low_risk",
+    "momentum",
+    "profit_growth",
+    "profitability",
+    "quality",
+    "seasonality",
+    "short_term_reversal",
+    "size",
+    "value",
+]
+
+def load_jkp(path: Path, train_period) -> pd.DataFrame:
+    raw = pd.read_csv(path, parse_dates=["date"])
+    market = raw.pivot(index="date", columns="name", values="ret").sort_index()
+    missing = set(JKP_COLUMNS) - set(market.columns)
+    if missing:
+        raise ValueError(f"JKP file is missing factors: {sorted(missing)}")
+    market = market[JKP_COLUMNS]
+
+    # Match Qlib's RobustZScoreNorm using training-period statistics only.
+    fit = market.loc[train_period[0] : train_period[1]]
+    center = fit.median(axis=0)
+    scale = (fit - center).abs().median(axis=0) * 1.4826 + 1e-12
+    return ((market - center) / scale).clip(-3, 3).astype("float32")
+
+
+def attach_market(df: pd.DataFrame, market: pd.DataFrame) -> pd.DataFrame:
+    if not isinstance(df.columns, pd.MultiIndex):
+        raise ValueError("Expected Qlib feature/label MultiIndex columns")
+
+    dates = pd.DatetimeIndex(df.index.get_level_values("datetime"))
+    aligned = market.reindex(dates)
+    if aligned.isna().any().any():
+        missing_dates = pd.DatetimeIndex(dates[aligned.isna().any(axis=1)]).unique()
+        raise ValueError(f"JKP data missing for Qlib dates: {missing_dates[:10].tolist()}")
+
+    prior = pd.DataFrame(aligned.to_numpy(), index=df.index)
+    prior.columns = pd.MultiIndex.from_product([["prior"], JKP_COLUMNS])
+    feature = df.loc[:, "feature"]
+    label = df.loc[:, "label"]
+    feature.columns = pd.MultiIndex.from_product([["feature"], feature.columns])
+    label.columns = pd.MultiIndex.from_product([["label"], label.columns])
+    return pd.concat([feature, prior, label], axis=1).astype("float32")
+
+
+def main() -> None:
+    parser = ArgumentParser()
+    parser.add_argument("--config", required=True)
+    args = parser.parse_args()
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    data = config["data"]
+    segments = {
+        name: tuple(str(value) for value in data[f"{name}_period"])
+        for name in ("train", "valid", "test")
+    }
+    provider_uri = str(Path(data["provider_uri"]).expanduser())
+    output_dir = Path(data["data_path"]) / data["prefix"]
+
+    qlib.init(provider_uri=provider_uri, region=data["region"])
+    handler = Alpha158(
+        instruments=data["universe"],
+        start_time=str(data["handler_start"]),
+        end_time=str(data["handler_end"]),
+        fit_start_time=segments["train"][0],
+        fit_end_time=segments["train"][1],
+        infer_processors=[
+            {"class": "RobustZScoreNorm", "kwargs": {"fields_group": "feature", "clip_outlier": True}},
+            {"class": "Fillna", "kwargs": {"fields_group": "feature"}},
+        ],
+        learn_processors=[
+            {"class": "DropnaLabel"},
+            {"class": "CSRankNorm", "kwargs": {"fields_group": "label"}},
+        ],
+        label=[data["label"]],
+    )
+    market = load_jkp(Path(data["jkp_path"]), segments["train"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for name, period in segments.items():
+        data_key = DataHandlerLP.DK_I if name == "test" else DataHandlerLP.DK_L
+        frame = handler.fetch(
+            slice(*period), col_set=["feature", "label"], data_key=data_key
+        )
+        frame = attach_market(frame, market)
+        static_handler = DataHandlerLP.from_df(frame)
+        dataset = TSDatasetH(
+            handler=static_handler,
+            segments={name: period},
+            step_len=data["window_size"],
+        )
+        sampler = dataset.prepare(name, data_key=DataHandlerLP.DK_I)
+        sampler.config(fillna_type="ffill+bfill")
+
+        path = output_dir / f"{data['universe']}_others_{data['window_size']}_dl_{name}.pkl"
+        with path.open("wb") as f:
+            pickle.dump(sampler, f, protocol=pickle.HIGHEST_PROTOCOL)
+        sample = sampler[0]
+        if sample.shape[-1] != 172:
+            raise RuntimeError(f"Unexpected {name} tensor shape: {sample.shape}")
+        print(f"{name}: {len(sampler)} samples, sample={sample.shape}, saved={path}")
+
+
+if __name__ == "__main__":
+    main()

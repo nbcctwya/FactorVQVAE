@@ -68,7 +68,7 @@ class AutoRegressiveTransformer(nn.Module):
             )
         
         # load trained models for encoder, decoder, and quantizer
-        self.checkpoint_folder = config['transformer']['checkpoint_folder']
+        self.checkpoint_folder = config['paths']['checkpoint_dir']
         self.load_pretrained_model(config)
 
         # Initialize transformer
@@ -92,9 +92,11 @@ class AutoRegressiveTransformer(nn.Module):
     def load_pretrained_model(self, config):
         saved_model = config['transformer']['saved_model']
         saved_model = f"{saved_model}.ckpt" if saved_model and not saved_model.endswith('.ckpt') else saved_model
-        checkpoint_path = Path(get_root_dir()).joinpath(self.checkpoint_folder, saved_model)
+        checkpoint_path = Path(self.checkpoint_folder).joinpath(saved_model)
         try:
-            checkpoint = torch.load(checkpoint_path)['state_dict']
+            checkpoint = torch.load(
+                checkpoint_path, map_location="cpu", weights_only=False
+            )['state_dict']
         except FileNotFoundError:
             print(f"Checkpoint not found at {checkpoint_path}.")
             sys.exit(1)
@@ -149,7 +151,7 @@ class AutoRegressiveTransformer(nn.Module):
         Passes quantized embeddings through the decoder.
         """
         # Retrieve quantized embeddings from the codebook
-        codebook = self.quantizer.get_codebook().to(self.device)
+        codebook = self.quantizer.get_codebook().to(predicted_indices.device)
         quantized_embeddings = F.embedding(predicted_indices, codebook)
 
         # Decode the quantized embeddings
