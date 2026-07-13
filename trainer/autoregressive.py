@@ -61,6 +61,15 @@ class minGPT(pl.LightningModule):
         logit, target, y_hat = self.mingpt(firm_char=firm_char, y=inputs, market= market)
         return logit, target, y_hat
 
+    def return_loss(self, y_hat, y):
+        """Compute the prediction-day loss across the daily stock cross-section."""
+        pred = y_hat[:, -1, 0]
+        true = y[:, -1, 0]
+        if self.rank_loss:
+            # RankLoss expects [number of cross-sections, number of stocks].
+            return self.mse_loss(pred.unsqueeze(0), true.unsqueeze(0))
+        return self.mse_loss(pred, true)
+
 
     def training_step(self, batch, batch_idx):
         batch = batch.squeeze(0)
@@ -73,7 +82,7 @@ class minGPT(pl.LightningModule):
         y = batch[:, :, -1].unsqueeze(-1)
         logit, target, y_hat = self.forward(firm_char, y, market)
         prior_loss = F.cross_entropy(logit.reshape(-1, logit.size(-1)), target.reshape(-1))
-        mse_loss = self.mse_loss(y_hat, y[:, -1:, :])
+        mse_loss = self.return_loss(y_hat, y)
         #loss = self.eta * prior_loss + mse_loss
         loss = prior_loss + self.omega * mse_loss
         self.log('train_loss', loss)
@@ -89,7 +98,7 @@ class minGPT(pl.LightningModule):
 
         logit, target, y_hat = self.forward(firm_char, y, market)
         prior_loss = F.cross_entropy(logit.reshape(-1, logit.size(-1)), target.reshape(-1), ignore_index=-1)
-        mse_loss = self.mse_loss(y_hat, y[:, -1:, :])
+        mse_loss = self.return_loss(y_hat, y)
         #loss = self.eta * prior_loss + mse_loss
         loss = prior_loss + self.omega * mse_loss
         self.log('val_loss', loss, on_epoch=True, logger=True, sync_dist=True)

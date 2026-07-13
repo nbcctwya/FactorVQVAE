@@ -78,6 +78,11 @@ def purge_segment_tail(df: pd.DataFrame, days: int) -> pd.DataFrame:
 def main() -> None:
     parser = ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument(
+        "--segments", nargs="+", choices=["train", "valid", "test"],
+        default=["train", "valid", "test"],
+        help="Only rebuild the selected cached segments.",
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -113,8 +118,12 @@ def main() -> None:
     market = load_jkp(Path(data["jkp_path"]), segments["train"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for name, period in segments.items():
-        data_key = DataHandlerLP.DK_I if name == "test" else DataHandlerLP.DK_L
+    for name in args.segments:
+        period = segments[name]
+        # Every model_label must have the same CSRankNorm transformation used
+        # to train Stage1.  Test additionally keeps the raw return strictly for
+        # metrics/backtesting; it is never passed to the encoder.
+        data_key = DataHandlerLP.DK_L
         frame = handler.fetch(
             slice(*period), col_set=["feature", "label"], data_key=data_key
         )
@@ -123,6 +132,15 @@ def main() -> None:
         if name in ("train", "valid"):
             frame = purge_segment_tail(frame, int(data.get("purge_label_days", 0)))
         frame = attach_market(frame, market)
+        if name == "test":
+            raw = handler.fetch(
+                slice(*period), col_set=["label"], data_key=DataHandlerLP.DK_I
+            ).reindex(frame.index)
+            raw_label = raw.loc[:, "label"]
+            raw_label.columns = pd.MultiIndex.from_product(
+                [["raw_label"], raw_label.columns]
+            )
+            frame = pd.concat([frame, raw_label.astype("float32")], axis=1)
         static_handler = DataHandlerLP.from_df(frame)
         dataset = TSDatasetH(
             handler=static_handler,
@@ -136,7 +154,8 @@ def main() -> None:
         with path.open("wb") as f:
             pickle.dump(sampler, f, protocol=pickle.HIGHEST_PROTOCOL)
         sample = sampler[0]
-        if sample.shape[-1] != 172:
+        expected_width = 173 if name == "test" else 172
+        if sample.shape[-1] != expected_width:
             raise RuntimeError(f"Unexpected {name} tensor shape: {sample.shape}")
         print(f"{name}: {len(sampler)} samples, sample={sample.shape}, saved={path}")
 

@@ -70,12 +70,15 @@ def run_inference(model, data_loader, device='cuda'):
         num_features = model.config['vqvae']['num_features']
         market_features = model.config['vqvae']['market_features']
         firm_char = batch[:, :, :num_features]
-        inputs = batch[:, :, -1].unsqueeze(-1)
+        model_label_col = num_features + market_features
+        inputs = batch[:, :, model_label_col].unsqueeze(-1)
         market = batch[:, :, num_features:num_features + market_features]
 
         delay = model.mingpt.label_delay
         known_inputs = inputs[:, :-delay, :]
-        y = inputs[:, -1, :]
+        # A 173-column test cache carries raw return as the final column for
+        # metrics.  The normalized model label above alone generates tokens.
+        y = batch[:, -1, -1] if batch.shape[-1] > model_label_col + 1 else inputs[:, -1, 0]
         _, y_hat = model.mingpt.predict(firm_char, known_inputs, market)
         y_hat = y_hat[:, -1, :]
 

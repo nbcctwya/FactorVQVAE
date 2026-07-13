@@ -81,10 +81,14 @@ class InvestmentModel:
             num_market = self.config['vqvae']['market_features']
             firm_char = batch[:, :, :num_features].to(self.device)
             market = batch[:, :, num_features:num_features + num_market].to(self.device)
-            labels = batch[:, :, -1].unsqueeze(-1).to(self.device)
+            model_label_col = num_features + num_market
+            labels = batch[:, :, model_label_col].unsqueeze(-1).to(self.device)
             delay = self.model.label_delay
             known_labels = labels[:, :-delay, :]
-            y = labels[:, -1, :]
+            if batch.shape[-1] > model_label_col + 1:
+                y = batch[:, -1, -1].unsqueeze(-1).to(self.device)
+            else:
+                y = labels[:, -1, :]
 
             # Use the same leakage-safe path as training and test inference.
             _, y_hat = self.model.predict(firm_char, known_labels, market)

@@ -56,24 +56,24 @@ def train_stage2(config, train_loader, valid_loader, test_loader):
         version=run_name,
     )
 
-    chekcpoint_callback = ModelCheckpoint(
+    checkpoint_callback = ModelCheckpoint(
         save_top_k=1,
-        monitor=config['train']['stage2_monitor'],
-        mode='max',
+        monitor=config['train']['stage2_checkpoint_monitor'],
+        mode=config['train']['stage2_checkpoint_mode'],
         dirpath=config['paths']['checkpoint_dir'],
-        filename = f'{run_name}'+'-{epoch}-{val_loss:.4f}'
+        filename=f'{run_name}'+'-{epoch}-{Val_RIC:.4f}-{val_loss:.4f}',
     )
 
     early_stop_callback = EarlyStopping(
-        monitor='val_loss',
+        monitor=config['train']['stage2_early_stop_monitor'],
         min_delta=0.0001,
         patience=config['train']['stage2_early_stop'],
         verbose=True,
-        mode='min'
+        mode=config['train']['stage2_early_stop_mode'],
     )
 
     callbacks =[LearningRateMonitor(logging_interval='step'),
-                chekcpoint_callback, 
+                checkpoint_callback,
                 early_stop_callback]
         
     trainer = pl.Trainer(logger = logger,
@@ -91,7 +91,7 @@ def train_stage2(config, train_loader, valid_loader, test_loader):
     trainer.fit(model, train_dataloaders = train_loader, val_dataloaders = valid_loader)
     # Best Model Load
     model = minGPT.load_from_checkpoint(
-        chekcpoint_callback.best_model_path,
+        checkpoint_callback.best_model_path,
         config=config,
         n_train_samples=n_train_samples,
         weights_only=False,

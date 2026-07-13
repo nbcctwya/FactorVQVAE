@@ -16,8 +16,18 @@ class RankLoss(nn.Module):
         Returns:
         total_loss -- Computed rank loss
         """
-        r_pred = r_pred.squeeze()
-        r_true = r_true.squeeze()
+        # Preserve a singleton cross-section dimension.  Plain squeeze() turns
+        # [1, N] into [N] and breaks the pairwise stock-rank calculation.
+        if r_pred.ndim == 3 and r_pred.shape[-1] == 1:
+            r_pred = r_pred.squeeze(-1)
+        if r_true.ndim == 3 and r_true.shape[-1] == 1:
+            r_true = r_true.squeeze(-1)
+        if r_pred.ndim == 1:
+            r_pred = r_pred.unsqueeze(0)
+        if r_true.ndim == 1:
+            r_true = r_true.unsqueeze(0)
+        if r_pred.ndim != 2 or r_true.ndim != 2:
+            raise ValueError("RankLoss expects [cross_sections, stocks]")
 
         # First term: MSE loss
         mse_loss = F.mse_loss(r_pred, r_true, reduction='mean')

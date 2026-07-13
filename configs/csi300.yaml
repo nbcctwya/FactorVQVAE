@@ -65,7 +65,10 @@ train:
   stage1_early_stop: 10
   stage2_early_stop: 15
   stage1_monitor: val_loss
-  stage2_monitor: Val_RIC
+  stage2_checkpoint_monitor: Val_RIC
+  stage2_checkpoint_mode: max
+  stage2_early_stop_monitor: val_loss
+  stage2_early_stop_mode: min
   device: gpu
   devices: 1
   precision: 32
