@@ -76,59 +76,25 @@ class InvestmentModel:
         z_e_list = []
         print("Start inference")
         for batch in tqdm(self.dataloader):
-        
-            firm_char = batch[:, : ,0:158].to(self.device)
-            y = batch[:, :, 158].unsqueeze(-1).to(self.device)
-            market = batch[:, :, 159:].to(self.device)
-            
-            # feature extraction
-            firm_char = self.model.feature_extractor(firm_char) 
-            # firm_char_t_2 = firm_char[:,:-1,:] #* x_(t-2)
-            # firm_char_t_1 = firm_char[:, -1,:] #* x_(t-1)
+            batch = batch.squeeze(0)
+            num_features = self.config['vqvae']['num_features']
+            num_market = self.config['vqvae']['market_features']
+            firm_char = batch[:, :, :num_features].to(self.device)
+            market = batch[:, :, num_features:num_features + num_market].to(self.device)
+            labels = batch[:, :, -1].unsqueeze(-1).to(self.device)
+            delay = self.model.label_delay
+            known_labels = labels[:, :-delay, :]
+            y = labels[:, -1, :]
 
-            market = self.model.market_extractor(market) # market은 transformer에 모두 사용
-            inputs_t_1 = y[:,:-1,:] #* y_(t-1):: t-1 까지의 스텝
-            y = y[:,-1,:] #* y_t (ground truth):: 한 시점 다음 스텝 예측
-
-            # encode to z_q
-            z_e = self.model.encoder(inputs_t_1)
-            z_q , vq_dict = self.model.quantizer(z_e)
-            idx = vq_dict['q'].squeeze() # transformer input
-
-            # Add sos token in the first position
-            sos_token = torch.ones((idx.size(0), 1, ), dtype=torch.long) * self.model.sos_token_ids
-            sos_token = sos_token.long().to(self.device)
-            idx = torch.cat([sos_token, idx], dim=1).long()
-
-            # transformer
-            if self.config['transformer']['use_market']:
-                market = self.mingpt.market_extractor(market)
-                logits = self.mingpt.transformer(idx, market)
-
-            else:
-                logits = self.mingpt.transformer(idx)
-            logit = logits[:, -1, :] # get last token logit :: y^_t
-            
-            if top_k is not None:
-                logit = self.top_k_logits(logit, top_k)
-            # probs = F.softmax(logit, dim=-1)
-            # ix = torch.multinomial(probs, num_samples=1)
-            ix = torch.argmax(logit, dim=-1).unsqueeze(-1)
-            sampling_idx = torch.cat([idx, ix], dim=1) 
-            # get rid of sos token
-            sampling_idx = sampling_idx[:, 1:]
-
-            # get quantized value from codebook (B x N x C)
-            quantize = F.embedding(sampling_idx, self.model.quantizer.get_codebook().to(self.device)) 
-            # get decoder output
-            y_hat, _ = self.model.decoder(firm_char = firm_char, inputs = quantize)
+            # Use the same leakage-safe path as training and test inference.
+            _, y_hat = self.model.predict(firm_char, known_labels, market)
             y_hat = y_hat[:, -1, :]
             reconstr_loss = F.mse_loss(y_hat, y)
 
             pred.append(y_hat.cpu().detach().numpy())
             real.append(y.cpu().detach().numpy())
             loss.append(reconstr_loss.cpu().detach().numpy())
-            z_e_list.append(z_e.cpu().detach().numpy())
+            z_e_list.append(self.model.encoder(known_labels).cpu().detach().numpy())
 
         pred = pd.Series(np.concatenate(pred, axis=0).squeeze(), index=test_index)
         real = pd.Series(np.concatenate(real, axis=0).squeeze(), index=test_index)
@@ -138,28 +104,10 @@ class InvestmentModel:
 
     @torch.no_grad()
     def check_tokenizer(self, data_path):
-        print("Load data from {}".format(data_path))
-        self.dataframe = pd.read_csv(data_path)
-        self.dataloader = self.get_dataloader(self.dataframe)
-        print("Start inference")
-        idx_list = []
-        for batch in tqdm(self.dataloader):
-            
-            firm_char, inputs = batch # [batch_size, window_size, feature_dim]  #* x_(t-2)
-            firm_char = firm_char.to(self.device)
-            inputs = inputs.to(self.device)
-
-            firm_char_t_2 = self.model.feature_extractor(firm_char[:,:-1,:]) #* x_(t-2)
-            # firm_cahr_t_1 = self.model.feature_extractor(firm_char)[:,-1,:] #* x_(t-1)
-            inputs_t_1 = inputs[:,:-1,:] #* y_(t-1)
-            y = inputs[:,-1,:] #* y_t (ground truth)
-            
-            z_e = self.model.encoder(firm_char_t_2, inputs_t_1)
-            z_q, vq_dict = self.model.quantizer(z_e)
-            idx = vq_dict['q'].squeeze()
-            idx_list.append(idx.cpu().detach().numpy())
-
-        return idx_list
+        raise NotImplementedError(
+            "Legacy tokenizer audit is incompatible with delayed labels; "
+            "use AutoRegressiveTransformer.predict with labels through t-2."
+        )
 
     def top_k_logits(self, logits, k):
         v, ix = torch.topk(logits, k)
@@ -170,59 +118,9 @@ class InvestmentModel:
 
     @torch.no_grad()
     def inference_bert(self, data_path):
-        test_index = self.build_data_loader(data_path)
-
-        pred = []
-        real = []
-        loss = []
-        print("Start inference")
-        for batch in tqdm(self.dataloader):
-            
-            firm_char = batch[:, : ,0:158]
-            inputs = batch[:, :, 158].unsqueeze(-1)
-            market = batch[:, :, 159:] # no use in bert
-
-            firm_char = firm_char.to(self.device)
-            inputs = inputs.to(self.device)
-
-            firm_char_t_2 = self.model.feature_extractor(firm_char[:,:-1,:]) #* x_(t-2)
-            firm_char_t_1 = self.model.feature_extractor(firm_char[:,-1,:]) #* x_(t-1)
-            inputs_t_1 = inputs[:,:-1,:] #* y_(t-1)
-            y = inputs[:,-1,:] #* y_t (ground truth)
-            
-            z_e = self.model.encoder(inputs_t_1)
-            z_q, vq_dict = self.model.quantizer(z_e)
-            idx = vq_dict['q'].squeeze()
-
-            # Add Mask token in the last position
-            mask_token = torch.ones((idx.size(0), 1, )).to(idx.device) * self.model.mask_token_ids
-            idx = torch.cat([idx, mask_token], dim=1).long() # * get y_t
-
-            logit = self.model.transformer(idx)
-            # ?categorical distribution or multinomial distribution ?
-            # sample_ids = torch.distributions.Categorical(logits=logit).sample()
-            # sample_ids = torch.multinomial(F.softmax(logit, dim=-1), num_samples=1).squeeze()
-            sample_ids = torch.argmax(logit, dim=-1).squeeze()
-
-            quantize = F.embedding(sample_ids, self.model.quantizer.get_codebook().to(self.device))
-            quantize_t_1 = quantize[:,-1,:] #* y_(t-1)
-
-            # ! New model: we need hidden state from previous step.
-            _, hidden_states = self.model.decoder(firm_char=firm_char_t_2 , inputs = quantize[:,:-1,:])
-            y_hat, _ = self.model.decoder(firm_char = firm_char_t_1.unsqueeze(1) , inputs=quantize_t_1.unsqueeze(1), hidden = hidden_states)
-            y_hat = y_hat.squeeze(1)
-            
-            reconstr_loss = F.mse_loss(y_hat, y)
-
-            pred.append(y_hat.cpu().detach().numpy())
-            real.append(y.cpu().detach().numpy())
-            loss.append(reconstr_loss.cpu().detach().numpy())
-            
-        pred = pd.Series(np.concatenate(pred, axis=0).squeeze(), index=test_index)
-        real = pd.Series(np.concatenate(real, axis=0).squeeze(), index=test_index)
-        loss = np.mean(loss)
-
-        return pred, real, loss
+        raise NotImplementedError(
+            "The legacy BERT path does not implement delayed-label inference."
+        )
     
 
 def RankIC(df, column1='LABEL0', column2='Pred'):

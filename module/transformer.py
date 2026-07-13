@@ -30,6 +30,9 @@ class AutoRegressiveTransformer(nn.Module):
 
         self.config = config
         self.num_factors = config['vqvae']['num_factors']
+        self.label_delay = config['transformer'].get('label_delay', 2)
+        if self.label_delay < 1:
+            raise ValueError("transformer.label_delay must be at least 1")
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # define models
@@ -128,22 +131,32 @@ class AutoRegressiveTransformer(nn.Module):
         return z_q, vq_dict['q'].squeeze()
 
     @torch.no_grad()
-    def prepare_transformer_inputs(self, target_indices, device):
+    def prepare_transformer_inputs(self, known_indices, sequence_length, device):
         """
         Prepares input indices for the transformer, including SOS tokens and masked indices.
         """
-        sos_tokens = torch.full((target_indices.shape[0], 1), self.sos_token_ids, dtype=torch.long, device=device)
+        sos_tokens = torch.full((known_indices.shape[0], 1), self.sos_token_ids, dtype=torch.long, device=device)
         
         # Apply masking for denoising training (optional)
         assert 0.0 <= self.pkeep <= 1.0, "pkeep must be in the range [0, 1]"
         if self.pkeep < 1.0:
-            mask = torch.bernoulli(self.pkeep * torch.ones(target_indices.shape, device=device)).round().to(torch.int64)
-            random_indices = torch.randint_like(target_indices, self.vocab_size, device=device)
-            masked_indices = mask * target_indices + (1 - mask) * random_indices
+            mask = torch.bernoulli(self.pkeep * torch.ones(known_indices.shape, device=device)).round().to(torch.int64)
+            random_indices = torch.randint_like(known_indices, self.vocab_size, device=device)
+            masked_indices = mask * known_indices + (1 - mask) * random_indices
         else:
-            masked_indices = target_indices
-        # Concatenate SOS tokens with masked indices
-        input_indices = torch.cat((sos_tokens, masked_indices), dim=1)
+            masked_indices = known_indices
+
+        # At prediction day t, labels t-1 ... t-label_delay+1 are not yet
+        # realized.  Represent those unavailable positions with the SOS/MASK
+        # embedding; never manufacture them by encoding future labels.
+        unavailable = sequence_length - 1 - known_indices.shape[1]
+        if unavailable < 0:
+            raise ValueError("known label sequence is longer than the model window")
+        mask_tokens = torch.full(
+            (known_indices.shape[0], unavailable), self.sos_token_ids,
+            dtype=torch.long, device=device,
+        )
+        input_indices = torch.cat((sos_tokens, masked_indices, mask_tokens), dim=1)
         return input_indices
     
     def decode_quantized_embeddings(self, firm_features, predicted_indices):
@@ -158,35 +171,57 @@ class AutoRegressiveTransformer(nn.Module):
         y_hat, _ = self.decoder(firm_char=firm_features, inputs=quantized_embeddings)
         return y_hat
     
+    def predict(self, firm_char, known_y, market):
+        """Predict y(t) using only labels that are realized by prediction day t."""
+        sequence_length = firm_char.shape[1]
+        expected_known = sequence_length - self.label_delay
+        if known_y.shape[1] != expected_known:
+            raise ValueError(
+                f"expected {expected_known} known labels for a window of "
+                f"{sequence_length}, got {known_y.shape[1]}"
+            )
+
+        # A suspended/missing historical return is not observable.  Zero is a
+        # neutral, leakage-safe placeholder; never backfill it from a later day.
+        known_y = torch.nan_to_num(known_y, nan=0.0, posinf=0.0, neginf=0.0)
+
+        firm_char = torch.nan_to_num(firm_char, nan=0.0, posinf=0.0, neginf=0.0)
+        market = torch.nan_to_num(market, nan=0.0, posinf=0.0, neginf=0.0)
+        firm_features = self.feature_extractor(firm_char[:, -1:, :])
+        market_features = self.market_extractor(market)
+        _, known_indices = self.encode_to_z_q(known_y)
+        known_indices = known_indices.reshape(known_y.shape[0], -1).long()
+        input_indices = self.prepare_transformer_inputs(
+            known_indices, sequence_length, firm_char.device
+        )
+
+        if self.use_market:
+            logits = self.transformer(input_indices, market_features)
+        else:
+            logits = self.transformer(input_indices)
+        target_logits = logits[:, -1:, :]
+        predicted_indices = torch.argmax(target_logits, dim=-1)
+        y_hat = self.decode_quantized_embeddings(firm_features, predicted_indices)
+        return target_logits, y_hat
+
     def forward(self, firm_char, y, market):
         """
         Forward pass through the model.
         """
-        device = firm_char.device
-        
-        # Extract features
-        firm_features = self.feature_extractor(firm_char)
-        market_features = self.market_extractor(market)
-        
-        # Encode `y` into discrete representations
-        z_q, target_indices = self.encode_to_z_q(y)
-        
-        # Concatenate SOS tokens with masked indices
-        input_indices = self.prepare_transformer_inputs(target_indices, device)
-        
-        # Generate transformer logits
-        if self.use_market:
-            logits = self.transformer(input_indices[:, :-1], market_features)
-        else:
-            logits = self.transformer(input_indices[:, :-1])
-        
-        # Compute predicted indices from logits
-        predicted_indices = torch.argmax(logits, dim=-1)
-        
-        # Decode quantized embeddings
-        y_hat = self.decode_quantized_embeddings(firm_features = firm_features, 
-                                                 predicted_indices = predicted_indices)
-        
+        if y.shape[1] != firm_char.shape[1]:
+            raise ValueError("firm_char and y must have the same sequence length")
+
+        known_y = y[:, :-self.label_delay, :]
+        logits, y_hat = self.predict(firm_char, known_y, market)
+
+        # The target is supervision, not a model input.  Generate it exactly as
+        # Stage1 does (on the complete window), then retain only s(t).  The
+        # historical tokens from this call are deliberately discarded so they
+        # can never carry target/future information into the GPT context.
+        safe_y = torch.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+        _, all_target_indices = self.encode_to_z_q(safe_y)
+        all_target_indices = all_target_indices.reshape(y.shape[0], y.shape[1])
+        target_indices = all_target_indices[:, -1:].long()
         return logits, target_indices, y_hat
         
     # def top_k_logits(self, logits, k):

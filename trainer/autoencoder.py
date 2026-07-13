@@ -89,6 +89,11 @@ class FactorVQVAE(pl.LightningModule):
         recon_loss = {'recon_loss': 0}
         cmt_loss = {'cmt_loss': 0}
 
+        # Initial padding for a newly listed stock has no earlier row to
+        # forward-fill.  Use neutral zeros instead of leaking a later row.
+        firm_char = torch.nan_to_num(firm_char, nan=0.0, posinf=0.0, neginf=0.0)
+        y = torch.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+
         # encode
         firm_char = self.feature_extractor(firm_char)
         

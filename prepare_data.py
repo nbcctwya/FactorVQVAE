@@ -65,6 +65,16 @@ def attach_market(df: pd.DataFrame, market: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([feature, prior, label], axis=1).astype("float32")
 
 
+def purge_segment_tail(df: pd.DataFrame, days: int) -> pd.DataFrame:
+    """Remove prediction dates whose label realization crosses a split boundary."""
+    if days <= 0 or df.empty:
+        return df
+    dates = pd.DatetimeIndex(df.index.get_level_values("datetime")).unique().sort_values()
+    if len(dates) <= days:
+        raise ValueError(f"segment has only {len(dates)} dates; cannot purge {days}")
+    return df.loc[df.index.get_level_values("datetime") < dates[-days]]
+
+
 def main() -> None:
     parser = ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -79,6 +89,9 @@ def main() -> None:
     }
     provider_uri = str(Path(data["provider_uri"]).expanduser())
     output_dir = Path(data["data_path"]) / data["prefix"]
+    window_fillna = data.get("window_fillna", "ffill")
+    if window_fillna not in ("none", "ffill"):
+        raise ValueError("data.window_fillna must be 'none' or leakage-safe 'ffill'")
 
     qlib.init(provider_uri=provider_uri, region=data["region"])
     handler = Alpha158(
@@ -105,6 +118,10 @@ def main() -> None:
         frame = handler.fetch(
             slice(*period), col_set=["feature", "label"], data_key=data_key
         )
+        # Labels near a train/validation boundary use prices from the following
+        # split.  Keep the requested calendar split, but embargo those samples.
+        if name in ("train", "valid"):
+            frame = purge_segment_tail(frame, int(data.get("purge_label_days", 0)))
         frame = attach_market(frame, market)
         static_handler = DataHandlerLP.from_df(frame)
         dataset = TSDatasetH(
@@ -113,7 +130,7 @@ def main() -> None:
             step_len=data["window_size"],
         )
         sampler = dataset.prepare(name, data_key=DataHandlerLP.DK_I)
-        sampler.config(fillna_type="ffill+bfill")
+        sampler.config(fillna_type=window_fillna)
 
         path = output_dir / f"{data['universe']}_others_{data['window_size']}_dl_{name}.pkl"
         with path.open("wb") as f:

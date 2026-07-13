@@ -73,7 +73,7 @@ class minGPT(pl.LightningModule):
         y = batch[:, :, -1].unsqueeze(-1)
         logit, target, y_hat = self.forward(firm_char, y, market)
         prior_loss = F.cross_entropy(logit.reshape(-1, logit.size(-1)), target.reshape(-1))
-        mse_loss = self.mse_loss(y_hat, y)
+        mse_loss = self.mse_loss(y_hat, y[:, -1:, :])
         #loss = self.eta * prior_loss + mse_loss
         loss = prior_loss + self.omega * mse_loss
         self.log('train_loss', loss)
@@ -89,7 +89,7 @@ class minGPT(pl.LightningModule):
 
         logit, target, y_hat = self.forward(firm_char, y, market)
         prior_loss = F.cross_entropy(logit.reshape(-1, logit.size(-1)), target.reshape(-1), ignore_index=-1)
-        mse_loss = self.mse_loss(y_hat, y)
+        mse_loss = self.mse_loss(y_hat, y[:, -1:, :])
         #loss = self.eta * prior_loss + mse_loss
         loss = prior_loss + self.omega * mse_loss
         self.log('val_loss', loss, on_epoch=True, logger=True, sync_dist=True)

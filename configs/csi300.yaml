@@ -16,12 +16,15 @@ data:
   jkp_path: data/dataset/[chn]_[all_themes]_[daily]_[vw_cap].csv
   data_path: data
   window_size: 20
+  window_fillna: ffill
   train_period: [2009-01-01, 2020-12-31]
   valid_period: [2021-01-01, 2022-12-31]
   test_period: [2023-01-01, 2025-12-31]
   handler_start: 2008-01-01
-  handler_end: 2025-12-31
-  label: Ref($close, -5) / Ref($close, -1) - 1
+  # Extra dates are needed to realize labels for the last 2025 predictions.
+  handler_end: 2026-01-15
+  label: Ref($close, -2) / Ref($close, -1) - 1
+  purge_label_days: 2
 
 vqvae:
   input_channel: 1
@@ -36,6 +39,8 @@ vqvae:
 
 transformer:
   use_market: true
+  # label(t) uses close(t+1:t+2), so at prediction t only <= t-2 is known.
+  label_delay: 2
   num_tokens: 20
   hidden_size: 64
   heads: 2

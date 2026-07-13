@@ -73,42 +73,11 @@ def run_inference(model, data_loader, device='cuda'):
         inputs = batch[:, :, -1].unsqueeze(-1)
         market = batch[:, :, num_features:num_features + market_features]
 
-        firm_char     = model.mingpt.feature_extractor(firm_char) 
-        # firm_char_t = firm_char[:, :-1, :] # (B, T-1, 1)
-        # firm_chat_t_1 = firm_char[:, -1, :] # (B, 1, 1)
-
-        inputs_t_1 = inputs[:, :-1, :] # (B, T-1, 1)
-        y = inputs[:, -1, :] # (B, 1, 1)
-
-        z_e = model.mingpt.encoder(inputs_t_1)
-        z_q, vq_dict = model.mingpt.quantizer(z_e) # 
-        idx = vq_dict['q'].squeeze()
-
-        sos_token = torch.ones((idx.size(0), 1, ), dtype=torch.long) * model.mingpt.sos_token_ids
-        sos_token = sos_token.long().to(device)
-        idx = torch.cat([sos_token, idx], dim=1).long()
-
-        # market feature 사용 여부
-        if model.config['transformer']['use_market']:
-            market_feat = model.mingpt.market_extractor(market)
-            logits = model.mingpt.transformer(idx, market_feat)
-        else:
-            logits = model.mingpt.transformer(idx)
-        logit = logits[:, -1, :]
-
-        # probs = F.softmax(logit, dim=-1)
-        # ix = torch.multinomial(probs, num_samples=1)
-        
-        ix = torch.argmax(logit, dim=-1).unsqueeze(-1)
-        sampling_idx = torch.cat([idx, ix], dim=1) # (B, T+1)
-        # get rid of sos token
-        sampling_idx = sampling_idx[:, 1:] # (B, T)
-
-        # get quantized value from codebook (B x N x C)
-        quantize = F.embedding(sampling_idx, model.mingpt.quantizer.get_codebook().to(device)) 
-        # get decoder output
-        y_hat, _ = model.mingpt.decoder(firm_char = firm_char, inputs = quantize)
-        y_hat = y_hat[:,-1,:]
+        delay = model.mingpt.label_delay
+        known_inputs = inputs[:, :-delay, :]
+        y = inputs[:, -1, :]
+        _, y_hat = model.mingpt.predict(firm_char, known_inputs, market)
+        y_hat = y_hat[:, -1, :]
 
         preds.append(y_hat.cpu().detach().numpy())
         reals.append(y.cpu().detach().numpy())

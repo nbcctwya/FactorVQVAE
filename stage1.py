@@ -114,9 +114,14 @@ if __name__ == "__main__":
         train_prepare = TsDataset.prepare(segments='train', data_key=DataHandlerLP.DK_L)
         valid_prepare = TsDataset.prepare(segments='valid', data_key=DataHandlerLP.DK_L)
         test_prepare = TsDataset.prepare(segments='test', data_key=DataHandlerLP.DK_I)
-        train_prepare.config(fillna_type='ffill+bfill')
-        valid_prepare.config(fillna_type='ffill+bfill')
-        test_prepare.config(fillna_type='ffill+bfill')
+    # Never backfill a time-series window: that copies a later row (including
+    # its label) into the past.  Forward fill uses only already observed rows.
+    window_fillna = config['data'].get('window_fillna', 'ffill')
+    if window_fillna not in ('none', 'ffill'):
+        raise ValueError("data.window_fillna must not use future backfill")
+    train_prepare.config(fillna_type=window_fillna)
+    valid_prepare.config(fillna_type=window_fillna)
+    test_prepare.config(fillna_type=window_fillna)
 
     num_workers = config['train']['num_workers']
     train_loader = init_data_loader(train_prepare, shuffle=True, num_workers=config['train']['num_workers'])
