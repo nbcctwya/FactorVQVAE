@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.0",
+  "baseline": "factorvqvae",
+  "markets": [
+    "csi300",
+    "sp500"
+  ],
+  "models": {
+    "csi300": [
+      "factorvqvae"
+    ],
+    "sp500": [
+      "factorvqvae"
+    ]
+  },
+  "seeds": {
+    "csi300": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "sp500": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "periods": {
+    "csi300": {
+      "train": [
+        "2009-01-01",
+        "2020-12-31"
+      ],
+      "valid": [
+        "2021-01-01",
+        "2022-12-31"
+      ],
+      "test": [
+        "2023-01-01",
+        "2025-12-31"
+      ]
+    },
+    "sp500": {
+      "train": [
+        "2009-01-01",
+        "2020-12-31"
+      ],
+      "valid": [
+        "2021-01-01",
+        "2022-12-31"
+      ],
+      "test": [
+        "2023-01-01",
+        "2025-12-31"
+      ]
+    }
+  },
+  "prediction_sources": {
+    "csi300": [
+      "outputs/csi300/results/csi300_Stage2_VQ512_Th64_h2_l2_sd0.pkl",
+      "outputs/csi300/results/csi300_Stage2_VQ512_Th64_h2_l2_sd1.pkl",
+      "outputs/csi300/results/csi300_Stage2_VQ512_Th64_h2_l2_sd2.pkl",
+      "outputs/csi300/results/csi300_Stage2_VQ512_Th64_h2_l2_sd3.pkl",
+      "outputs/csi300/results/csi300_Stage2_VQ512_Th64_h2_l2_sd4.pkl"
+    ],
+    "sp500": [
+      "outputs/sp500/results/sp500_Stage2_VQ128_Th32_h4_l2_sd0.pkl",
+      "outputs/sp500/results/sp500_Stage2_VQ128_Th32_h4_l2_sd1.pkl",
+      "outputs/sp500/results/sp500_Stage2_VQ128_Th32_h4_l2_sd2.pkl",
+      "outputs/sp500/results/sp500_Stage2_VQ128_Th32_h4_l2_sd3.pkl",
+      "outputs/sp500/results/sp500_Stage2_VQ128_Th32_h4_l2_sd4.pkl"
+    ]
+  },
+  "market_config": {
+    "csi300": {
+      "provider_uri": "~/.qlib/qlib_data/cn_data",
+      "region": "cn",
+      "instruments": "csi300",
+      "instruments_membership": "Qlib dynamic historical constituents",
+      "benchmark": "SH000300",
+      "deal_price": "close",
+      "limit_threshold": 0.095,
+      "suspension_and_untradable": "orders checked by Qlib Exchange; only_tradable=false affects candidate ranking only",
+      "trade_unit": 100,
+      "shorting": false,
+      "leverage": false
+    },
+    "sp500": {
+      "provider_uri": "~/.qlib/qlib_data/us_data",
+      "region": "us",
+      "instruments": "sp500",
+      "instruments_membership": "Qlib dynamic historical constituents",
+      "benchmark": "^gspc",
+      "deal_price": "close",
+      "limit_threshold": null,
+      "suspension_and_untradable": "orders checked by Qlib Exchange; only_tradable=false affects candidate ranking only",
+      "trade_unit": 1,
+      "shorting": false,
+      "leverage": false
+    }
+  },
+  "backtest": {
+    "strategy": "Qlib TopkDropoutStrategy",
+    "topk": 30,
+    "n_drop": 5,
+    "method_sell": "bottom",
+    "method_buy": "top",
+    "hold_thresh": 1,
+    "only_tradable": false,
+    "forbid_all_trade_at_limit": true,
+    "risk_degree": 0.95,
+    "freq": "day",
+    "account": 100000000,
+    "open_cost": 0.0005,
+    "close_cost": 0.0015,
+    "min_cost": 0.0,
+    "executor": "SimulatorExecutor",
+    "return_field_is_gross": true,
+    "return_semantics_evidence": "Qlib 0.9.7 Account.update_portfolio_metrics sets return_rate=(now_earning + now_cost) / last_account_value",
+    "net_return_formula": "daily_ret_net = report['return'] - report['cost']"
+  },
+  "signal_alignment": {
+    "signal_date": "t-1",
+    "trade_date": "t",
+    "qlib_internal_shift": 1,
+    "adapter_manual_shift": false,
+    "label_horizon": "Ref($close, -2) / Ref($close, -1) - 1; close(t+1) to close(t+2)"
+  },
+  "metric_convention": {
+    "annualization": 252,
+    "std_ddof": 1,
+    "risk_free_rate": 0,
+    "MAR_daily": 0,
+    "ranking": "daily cross-sectional Pearson/Spearman; IR=mean/std(ddof=1), not annualized",
+    "AR": "exp(mean(log1p(r_net))*252)-1",
+    "STD": "std(log1p(r_net),ddof=1)*sqrt(252)",
+    "MDD": "min([1,exp(cumsum(g))]/cummax-1)",
+    "Sharpe": "sqrt(252)*mean(g)/std(g,ddof=1)",
+    "Sortino": "sqrt(252)*mean(g)/sqrt(mean(min(g,0)^2)) over all days",
+    "Calmar": "AR/abs(MDD)"
+  },
+  "ensemble": {
+    "enabled": true,
+    "methods": [
+      "avg_none"
+    ],
+    "join": "inner",
+    "normalize": "none",
+    "score_formula": "arithmetic mean of aligned raw seed scores",
+    "ranking_metrics_source": "recomputed ensemble score and aligned label"
+  },
+  "qlib_version": "0.9.7",
+  "data_version_or_cutoff": "Qlib provider data through at least 2025-12-31; no provider revision ID available",
+  "git_commit": "b6d7caf1e5fa53287fcaa3a90e0856bc0e87cdfa"
+}

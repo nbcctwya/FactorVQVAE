@@ -1,0 +1,87 @@
+{
+  "passed": true,
+  "passes": 16,
+  "failures": 0,
+  "checks": [
+    {
+      "name": "manifest_files_exist",
+      "passed": true,
+      "detail": "8 manifest entries resolve"
+    },
+    {
+      "name": "seed_column_order",
+      "passed": true,
+      "detail": "['market', 'model', 'seed', 'IC', 'ICIR', 'RankIC', 'RankICIR', 'AR', 'STD', 'MDD', 'Sharpe', 'Sortino', 'Calmar', 'num_test_days', 'pred_path_or_ckpt_path']"
+    },
+    {
+      "name": "seed_completeness",
+      "passed": true,
+      "detail": "expected=10, actual=10"
+    },
+    {
+      "name": "seed_primary_key_unique",
+      "passed": true,
+      "detail": "rows=10"
+    },
+    {
+      "name": "seed_metrics_finite",
+      "passed": true,
+      "detail": "all seed numeric metrics must be finite"
+    },
+    {
+      "name": "seed_metric_bounds",
+      "passed": true,
+      "detail": "|IC|,|RankIC|<=1; STD>=0; MDD<=0"
+    },
+    {
+      "name": "aggregate_recomputed",
+      "passed": true,
+      "detail": "verified 2 groups"
+    },
+    {
+      "name": "seed_table_matches",
+      "passed": true,
+      "detail": "four-decimal seed table matches numeric aggregate"
+    },
+    {
+      "name": "fixed_backtest_config",
+      "passed": true,
+      "detail": "{'strategy': 'Qlib TopkDropoutStrategy', 'topk': 30, 'n_drop': 5, 'method_sell': 'bottom', 'method_buy': 'top', 'hold_thresh': 1, 'only_tradable': False, 'forbid_all_trade_at_limit': True, 'risk_degree': 0.95, 'account': 100000000, 'open_cost': 0.0005, 'close_cost': 0.0015, 'min_cost': 0.0, 'freq': 'day'}"
+    },
+    {
+      "name": "signal_alignment",
+      "passed": true,
+      "detail": "{'signal_date': 't-1', 'trade_date': 't', 'qlib_internal_shift': 1, 'adapter_manual_shift': False, 'label_horizon': 'Ref($close, -2) / Ref($close, -1) - 1; close(t+1) to close(t+2)'}"
+    },
+    {
+      "name": "prediction_test_coverage",
+      "passed": true,
+      "detail": "all prediction paths portable and cover their complete test calendars"
+    },
+    {
+      "name": "ensemble_completeness",
+      "passed": true,
+      "detail": "expected=2, actual=2"
+    },
+    {
+      "name": "ensemble_metrics_finite",
+      "passed": true,
+      "detail": "all ensemble numeric metrics finite"
+    },
+    {
+      "name": "ensemble_table_matches",
+      "passed": true,
+      "detail": "four-decimal ensemble table matches numeric metrics"
+    },
+    {
+      "name": "ensemble_curves_and_metrics",
+      "passed": true,
+      "detail": "verified 2 curves and all portfolio formulas"
+    },
+    {
+      "name": "ensemble_ranking_recomputed",
+      "passed": true,
+      "detail": "ranking metrics recomputed from aligned raw seed scores and labels"
+    }
+  ]
+}

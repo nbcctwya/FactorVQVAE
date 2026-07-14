@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "baseline": "factorvqvae",
+  "description": "FactorVQVAE standardized seed and raw-score ensemble evaluation",
+  "primary_keys": {
+    "seed_metrics": [
+      "market",
+      "model",
+      "seed"
+    ],
+    "aggregate_metrics": [
+      "market",
+      "model"
+    ],
+    "ensemble_metrics": [
+      "market",
+      "model",
+      "ensemble_method"
+    ]
+  },
+  "files": {
+    "seed_metrics": "metrics/seed_metrics.csv",
+    "aggregate_metrics": "metrics/aggregate_metrics.csv",
+    "seed_table": "tables/seed_mean_std.csv",
+    "eval_config": "metadata/eval_config.json",
+    "validation": "diagnostics/validation.json",
+    "ensemble_metrics": "metrics/ensemble_metrics.csv",
+    "ensemble_table": "tables/ensemble.csv",
+    "ensemble_curves": "curves/ensemble/*.csv"
+  }
+}

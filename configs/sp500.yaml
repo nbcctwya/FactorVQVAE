@@ -1,6 +1,7 @@
 experiment:
   market: sp500
   stage2_seeds: [0, 1, 2, 3, 4]
+  model: factorvqvae
 
 paths:
   checkpoint_dir: outputs/sp500/checkpoints
@@ -25,6 +26,11 @@ data:
   handler_end: 2026-01-15
   label: Ref($close, -2) / Ref($close, -1) - 1
   purge_label_days: 2
+
+evaluation:
+  benchmark: ^gspc
+  deal_price: close
+  limit_threshold: null
 
 vqvae:
   input_channel: 1

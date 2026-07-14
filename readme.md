@@ -166,6 +166,45 @@ outputs/<market>/results/       test prediction DataFrames
 outputs/<market>/store/         serialized Stage 2 model
 ```
 
+## Baseline Results Protocol v1.0
+
+The repository also provides a non-invasive standardized evaluation layer. It reads the
+existing prediction pickles, leaves all native outputs untouched, and reruns every seed
+and raw-score ensemble with Qlib `TopkDropoutStrategy` (`topk=30`, `n_drop=5`) under the
+protocol account, timing, and transaction-cost rules.
+
+Generate and validate the comparable artifacts without retraining:
+
+```bash
+BASELINE_ID=factorvqvae python generate_baseline_results.py \
+  --configs configs/csi300.yaml configs/sp500.yaml \
+  --out results
+BASELINE_ID=factorvqvae python inspect_eval_results.py --results results
+```
+
+The output layers have fixed roles:
+
+```text
+results/metrics/       numeric seed, aggregate, and ensemble metrics
+results/tables/        four-decimal paper/README display tables
+results/curves/        ensemble daily gross return, cost, net return, benchmark, and NAV
+results/metadata/      actual evaluation configuration and manifest
+results/diagnostics/   machine-readable validation report
+```
+
+Ranking metrics are daily cross-sectional Pearson IC and Spearman RankIC. Their IRs use
+daily-series sample standard deviation (`ddof=1`) and are not annualized. Portfolio
+metrics use daily net simple return (`Qlib return - cost`), log returns, annualization
+252, sample volatility, zero risk-free rate/MAR, and a NAV that includes the origin 1.0.
+`inspect_eval_results.py` independently reconstructs aggregates, tables, ensemble
+ranking metrics, daily NAVs, and all ensemble portfolio metrics; exit status 0 means all
+checks passed.
+
+Comparability still depends on matching the prediction target, test period, universe,
+and provider data version. This project predicts the close(t+1)-to-close(t+2) return
+from a signal assigned to day t; Qlib consumes that signal at trade day t+1 through its
+native `shift=1` strategy timing.
+
 ## Reproduction results
 
 Test period: 2023-01-01 to 2025-12-31. Values below use raw future returns for evaluation and the highest-validation-RankIC checkpoint for each seed.
