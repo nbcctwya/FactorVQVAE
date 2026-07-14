@@ -1,157 +1,217 @@
-# FactorVQVAE: Discrete latent factor model via Vector Quantized Variational Autoencoder
+# FactorVQVAE: Discrete Latent Factor Model
+
+PyTorch reproduction of **FactorVQVAE: Discrete latent factor model via Vector Quantized Variational Autoencoder**. The repository implements the two-stage VQ-VAE and autoregressive Transformer pipeline and provides configuration-driven experiments for CSI300 and SP500.
 
 <div align="center">
-  <table>
-    <tr>
-      <td align="center">
-        <img src="images/stage_overview.png" alt="Stage Overview" width="400"/>
-        <br>
-        <em>Figure 1: Two-stage training pipeline</em>
-      </td>
-      <td align="center">
-        <img src="images/ls-CSI.png" alt="CSI Performance Results" width="400"/>
-        <br>
-        <em>Figure 2: Performance results on CSI data</em>
-      </td>
-    </tr>
-  </table>
+  <img src="images/stage_overview.png" alt="FactorVQVAE two-stage pipeline" width="620"/>
 </div>
 
-## Overview
+## Pipeline
 
-Official PyTorch implementation of FactorVQVAE for learning discrete latent factors from financial data
+### Stage 1: VQ-VAE
 
-## Key Features
+Stage 1 learns a discrete representation of future returns:
 
-- **Two-stage training pipeline**: VQ-VAE training followed by GPT-based generative modeling
-- **Alpha158 features**: Comprehensive stock analysis using Qlib's Alpha158 characteristics
-- **Vector Quantization**: Compression of continuous features into discrete codebook representations
-
-## Model Architecture
-
-### Stage 1: VQ-VAE Training
-- **Feature Extractor**: GRU-based time series feature extraction
-- **Vector Quantizer**: Continuous-to-discrete codebook mapping
-- **Attention Layer**: Multi-head attention mechanism
-- **Linear Encoder/Decoder**: Return encoding and decoding
-
-### Stage 2: GPT-based Generative Model
-- **Transformer Architecture**: Autoregressive sequence generation
-- **Market Feature Integration**: Market-wide feature incorporation
-- **Rank Loss**: Enhanced return ranking prediction
-
-## Project Structure
-
+```text
+future return -> FactorEncoder -> VectorQuant -> code token
+stock features + quantized factor -> FactorDecoder -> reconstructed return
 ```
-FactorVQVAE-General/
-├── configs/                 # Model configuration files
-├── data/                    # Dataset classes and Chinese stock data
-├── module/                  # Core model implementations
-├── trainer/                 # Training modules
-├── utils/                   # Utility functions
-├── vqtorch/                 # Vector Quantization library
-├── stage1.py               # Stage 1 training script
-├── stage2_gpt.py          # Stage 2 training script
-└── stage2_gpt_sweep.py    # Hyperparameter sweep script
+
+Stage 1 uses seed 42 for both markets.
+
+### Stage 2: autoregressive prior
+
+The Stage 1 encoder, quantizer, and stock feature extractor are frozen. The Transformer predicts the target latent token from realized historical tokens and 13 market factors. The predicted code embedding is decoded into a return forecast.
+
+The checkpoint is selected by the highest validation RankIC (`Val_RIC`). Early stopping is independently based on validation loss.
+
+## Data
+
+Each ordinary train/validation sample contains 172 columns:
+
+```text
+Alpha158 stock features (158)
++ JKP market factors (13)
++ normalized model label (1)
+```
+
+The test cache contains 173 columns:
+
+```text
+Alpha158 (158) + JKP13 (13) + model_label (1) + raw_label (1)
+```
+
+- `model_label` is processed by Qlib `CSRankNorm` and is used to generate latent tokens.
+- `raw_label` is never passed to the model. It is retained only for IC, RankIC, and backtesting.
+- The JKP CSV files must contain all 13 themes listed in `prepare_data.py` and are configured with `data.jkp_path`.
+
+Expected JKP files in this reproduction:
+
+```text
+data/dataset/[chn]_[all_themes]_[daily]_[vw_cap].csv
+data/dataset/[usa]_[all_themes]_[daily]_[vw_cap].csv
+```
+
+### Label and timing
+
+The paper-style label is the return from trading day `t+1` to `t+2`:
+
+```text
+Ref($close, -2) / Ref($close, -1) - 1
+```
+
+Prediction is assumed to occur after the close of day `t`. Consequently, `label(t-1)` is not yet realized, and the most recent usable historical label is `label(t-2)`. Stage 2 enforces `transformer.label_delay: 2`; changing the unavailable `t-1` and `t` labels does not change model predictions.
+
+Time-series windows use forward fill only. Backfill is rejected because it can copy a future row and its label into an earlier position.
+
+### Splits
+
+| Segment | Configured period |
+|---|---|
+| Train | 2009-01-01 to 2020-12-31 |
+| Validation | 2021-01-01 to 2022-12-31 |
+| Test | 2023-01-01 to 2025-12-31 |
+
+The final two trading dates of train and validation are embargoed so that label realization does not cross a split boundary. The Qlib handler extends into January 2026 to calculate labels for the final 2025 prediction dates.
+
+## Market configurations
+
+| Market | Codebook | Transformer dim | Heads | Layers | Stage 1 seed | Stage 2 seeds |
+|---|---:|---:|---:|---:|---:|---|
+| CSI300 | 512 | 64 | 2 | 2 | 42 | 0, 1, 2, 3, 4 |
+| SP500 | 128 | 32 | 4 | 2 | 42 | 0, 1, 2, 3, 4 |
+
+The complete configurations are in:
+
+```text
+configs/csi300.yaml
+configs/sp500.yaml
 ```
 
 ## Installation
 
-### Requirements
+The experiments in this repository were run in the Conda environment `factorvqvae`. Install the packages in `requirements.txt`, Qlib, TensorBoard, a CUDA-compatible PyTorch build, and VQTorch.
+
 ```bash
-pip install torch pytorch-lightning
-pip install qlib
-pip install pandas numpy
-pip install tensorboard
-pip install pyyaml
-pip install cupy-cuda11x # or pip install cupy-cuda12x
+conda activate factorvqvae
+pip install -r requirements.txt
 ```
 
-### VQTorch Installation
-For the vector quantization library, please refer to the official repository at [@https://github.com/minyoungg/vqtorch](https://github.com/minyoungg/vqtorch) for detailed installation instructions.
+VQTorch is available from [minyoungg/vqtorch](https://github.com/minyoungg/vqtorch). Qlib data setup is documented in [microsoft/qlib](https://github.com/microsoft/qlib).
 
-**Important**: Make sure to install the correct CuPy version that is compatible with your CUDA version before installing vqtorch:
+The configured provider locations are:
 
-```bash
-# For CUDA 12.x versions
-pip install cupy-cuda12x
-
-# For CUDA 11.x versions  
-pip install cupy-cuda11x
-
-# Then install vqtorch
-git clone https://github.com/minyoungg/vqtorch
-cd vqtorch
-pip install -e .
-```
-
-### Qlib Data Setup
-
-Due to Qlib's data accessibility considerations, we recommend using opensource data sources. Please refer to the official Qlib repository at [@https://github.com/microsoft/qlib](https://github.com/microsoft/qlib) for detailed data setup instructions.
-
-#### Chinese Stock Data
-For Chinese stock market data, you can use the following commands:
-
-```bash
-# Download pre-processed Chinese stock data (recommended)
-wget https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz
-mkdir -p ~/.qlib/qlib_data/cn_data
-tar -zxvf qlib_bin.tar.gz -C ~/.qlib/qlib_data/cn_data --strip-components=1
-rm -f qlib_bin.tar.gz
-```
-
-Alternatively, you can use the official Qlib data downloader:
-```bash
-# Download Qlib Chinese stock data (official method)
-python -m qlib.run.get_data qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn
-```
-
-#### US Stock Data
-For US stock market data, we use Qlib's Yahoo data collector from [@https://github.com/microsoft/qlib/tree/main/scripts/data_collector/yahoo](https://github.com/microsoft/qlib/tree/main/scripts/data_collector/yahoo).
-
-Market index data can be obtained using:
-```bash
-# Parse instruments for market indices
-python collector.py --index_name SP500 --qlib_dir ~/.qlib/qlib_data/us_data --method parse_instruments
-
-# Parse new companies
-python collector.py --index_name SP500 --qlib_dir ~/.qlib/qlib_data/us_data --method save_new_companies
-
-# Supported index_name: SP500, NASDAQ100, DJIA, SP400
-# For more options
-python collector.py --help
+```text
+~/.qlib/qlib_data/cn_data
+~/.qlib/qlib_data/us_data
 ```
 
 ## Usage
 
-### Stage 1: VQ-VAE Training
+### Build cached datasets
+
 ```bash
-python stage1.py
+python prepare_data.py --config configs/csi300.yaml
+python prepare_data.py --config configs/sp500.yaml
 ```
 
-### Stage 2: GPT Model Training
+Rebuild only selected segments:
+
 ```bash
-python stage2_gpt.py
+python prepare_data.py --config configs/csi300.yaml --segments test
 ```
 
-### Hyperparameter Tuning
+### Train Stage 1
+
 ```bash
-python stage2_gpt_sweep.py
+python stage1.py --config configs/csi300.yaml
+python stage1.py --config configs/sp500.yaml
 ```
 
-## Configuration
+Each command saves the best Stage 1 model as `stage1_best.ckpt` under the market-specific checkpoint directory.
 
-The model configuration is managed through `configs/config.yaml`, which includes:
+### Train Stage 2
 
-- **VQ-VAE settings**: Feature dimensions, codebook size, hidden layers
-- **Transformer settings**: Architecture parameters, attention heads, layers
-- **Training settings**: Batch size, learning rate, epochs, device configuration
-- **Data settings**: Stock universe, time periods, window size
+```bash
+python stage2_gpt.py --config configs/csi300.yaml --seed 0
+python stage2_gpt.py --config configs/sp500.yaml --seed 0
+```
 
+Run the configuration-driven wrapper:
+
+```bash
+python run_experiment.py \
+  --config configs/csi300.yaml \
+  --stages stage1 stage2 \
+  --seeds 0 1 2 3 4
+```
+
+### Re-evaluate an existing checkpoint
+
+Existing Stage 2 checkpoints can be evaluated without retraining:
+
+```bash
+python evaluate_stage2.py \
+  --config configs/csi300.yaml \
+  --checkpoint outputs/csi300/checkpoints/<checkpoint>.ckpt \
+  --seed 0
+```
+
+### Outputs
+
+```text
+outputs/<market>/checkpoints/   best Stage 1 and Stage 2 checkpoints
+outputs/<market>/tb_logs/       TensorBoard logs
+outputs/<market>/results/       test prediction DataFrames
+outputs/<market>/store/         serialized Stage 2 model
+```
+
+## Reproduction results
+
+Test period: 2023-01-01 to 2025-12-31. Values below use raw future returns for evaluation and the highest-validation-RankIC checkpoint for each seed.
+
+### CSI300
+
+| Seed | IC | ICIR | RankIC | RankICIR |
+|---:|---:|---:|---:|---:|
+| 0 | 0.01358 | 0.08191 | 0.03981 | 0.26197 |
+| 1 | 0.01149 | 0.06748 | 0.03807 | 0.24168 |
+| 2 | 0.01290 | 0.07691 | 0.04040 | 0.25988 |
+| 3 | 0.01357 | 0.08183 | 0.04075 | 0.26498 |
+| 4 | 0.01250 | 0.07307 | 0.03976 | 0.24906 |
+| **Mean** | **0.01281** | **0.07624** | **0.03976** | **0.25551** |
+| **Std** | **0.00078** | **0.00549** | **0.00092** | **0.00876** |
+
+### SP500
+
+| Seed | IC | ICIR | RankIC | RankICIR |
+|---:|---:|---:|---:|---:|
+| 0 | 0.00099 | 0.00801 | 0.00625 | 0.04735 |
+| 1 | 0.00049 | 0.00405 | 0.00324 | 0.02412 |
+| 2 | 0.00159 | 0.01315 | 0.00388 | 0.02917 |
+| 3 | 0.00374 | 0.02934 | 0.00652 | 0.04666 |
+| 4 | -0.00555 | -0.05412 | -0.00229 | -0.02026 |
+| **Mean** | **0.00025** | **0.00009** | **0.00352** | **0.02541** |
+| **Std** | **0.00311** | **0.02844** | **0.00318** | **0.02463** |
+
+CSI300 is stable across seeds. SP500 is substantially weaker and more seed-sensitive under the current configuration.
+
+## Project structure
+
+```text
+configs/                 market-specific experiment configurations
+data/                    dataset helpers, JKP inputs, and generated caches
+module/                  VQ-VAE and Transformer implementations
+trainer/                 PyTorch Lightning training modules
+utils/                   metrics, inference, and utility functions
+prepare_data.py          build leakage-safe Qlib caches
+stage1.py                train VQ-VAE
+stage2_gpt.py            train autoregressive latent prior
+evaluate_stage2.py       evaluate an existing Stage 2 checkpoint
+run_experiment.py        configuration-driven experiment wrapper
+```
 
 ## Citation
-
-If you find this work useful for your research, we would be grateful if you could cite our paper:
 
 ```bibtex
 @article{kim2025factorvqvae,
@@ -167,10 +227,6 @@ If you find this work useful for your research, we would be grateful if you coul
 
 ## Acknowledgments
 
-We are grateful to the authors and contributors of the following projects that made this work possible:
-
-- **VQTorch** ([@https://github.com/minyoungg/vqtorch](https://github.com/minyoungg/vqtorch)): For providing an efficient and well-implemented vector quantization library
-- **MinGPT** ([@https://github.com/karpathy/minGPT](https://github.com/karpathy/minGPT)): For the clean and educational GPT implementation that inspired our transformer architecture
-- **Qlib** ([@https://github.com/microsoft/qlib](https://github.com/microsoft/qlib)): For the comprehensive quantitative investment platform and Alpha158 features
-
-We deeply appreciate the open-source community and the researchers who have contributed to these foundational works.
+- [VQTorch](https://github.com/minyoungg/vqtorch)
+- [minGPT](https://github.com/karpathy/minGPT)
+- [Qlib](https://github.com/microsoft/qlib)
