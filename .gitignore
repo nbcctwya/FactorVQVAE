@@ -8,3 +8,6 @@ store/
 tb_logs/
 outputs/
 archived_outputs/
+
+# dynamic evaluation outputs (yearly/quarterly/monthly)
+dynamic_metrics/
